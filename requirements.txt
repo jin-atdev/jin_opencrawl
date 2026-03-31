@@ -1,0 +1,9 @@
+deepagents>=0.4.0
+langgraph-checkpoint-postgres>=3.0.0
+google-api-python-client>=2.100.0
+google-auth-oauthlib>=1.2.0
+discord.py>=2.0.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+tavily-python>=0.5.0
+notion-client>=2.0.0

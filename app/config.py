@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_env() -> None:
+    env_path = _PROJECT_ROOT / ".env"
+    load_dotenv(env_path)
+
+
+_load_env()
+
+
+class Config:
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    # Tavily
+    tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
+
+    # Notion
+    notion_token: str = os.getenv("NOTION_TOKEN", "")
+
+    # Google Calendar
+    google_client_secret_path: str = os.getenv(
+        "GOOGLE_CLIENT_SECRET_PATH", "credentials/client_secret.json"
+    )
+    google_token_path: str = os.getenv(
+        "GOOGLE_TOKEN_PATH", "credentials/token.json"
+    )
+    google_calendar_scopes: list[str] = [
+        s.strip()
+        for s in os.getenv(
+            "GOOGLE_CALENDAR_SCOPES",
+            "https://www.googleapis.com/auth/calendar",
+        ).split(",")
+    ]
+
+    # Google Gmail
+    google_gmail_scopes: list[str] = [
+        s.strip()
+        for s in os.getenv(
+            "GOOGLE_GMAIL_SCOPES",
+            "https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/gmail.readonly",
+        ).split(",")
+    ]
+
+    # Discord
+    discord_bot_token: str = os.getenv("DISCORD_BOT_TOKEN", "")
+
+    # Daily Briefing
+    briefing_enabled: bool = os.getenv("BRIEFING_ENABLED", "false").lower() == "true"
+    briefing_time: str = os.getenv("BRIEFING_TIME", "09:00")
+    briefing_channel_id: int = int(os.getenv("BRIEFING_CHANNEL_ID", "0"))
+
+    # PostgreSQL
+    database_url: str = os.getenv(
+        "DATABASE_URL", "postgresql://hwangjin-yeong:@localhost:5432/jin_db"
+    )

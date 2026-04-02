@@ -203,46 +203,79 @@ def query_notion_database(
 
 @tool
 def create_notion_page(
-    database_id: str,
     title: str,
+    database_id: str = "",
+    parent_page_id: str = "",
     properties_json: str = "",
+    content: str = "",
 ) -> dict:
-    """Notion 데이터베이스에 새 페이지를 생성합니다.
+    """Notion에 새 페이지를 생성합니다. database_id 또는 parent_page_id 중 하나를 반드시 지정해야 합니다.
 
     Args:
-        database_id: 대상 데이터베이스 ID
         title: 페이지 제목
-        properties_json: 추가 속성 (JSON 문자열, 선택). 예: {"상태": {"select": {"name": "진행중"}}}
+        database_id: 대상 데이터베이스 ID (DB 하위 페이지 생성 시)
+        parent_page_id: 부모 페이지 ID (일반 페이지 하위에 생성 시)
+        properties_json: 추가 속성 (JSON 문자열, 선택). DB 페이지 전용. 예: {"상태": {"select": {"name": "진행중"}}}
+        content: 페이지 본문 텍스트 (선택). 줄바꿈으로 여러 단락 구분.
 
     Returns:
         생성된 페이지 정보 (id, url)
     """
-    logger.info("[TOOL] create_notion_page 호출: db=%s, title=%s", database_id, title)
+    logger.info("[TOOL] create_notion_page 호출: db=%s, parent=%s, title=%s", database_id, parent_page_id, title)
+
+    if not database_id and not parent_page_id:
+        return {"error": "database_id 또는 parent_page_id 중 하나를 지정해야 합니다. search_notion으로 부모 페이지나 데이터베이스를 먼저 검색하세요."}
 
     client = _get_notion_client()
     if client is None:
         return {"error": "Notion이 연결되지 않았습니다. NOTION_TOKEN을 설정해주세요."}
 
     try:
-        properties: dict = {}
-        if properties_json:
-            properties = json.loads(properties_json)
+        if database_id:
+            # DB 하위 페이지 생성
+            properties: dict = {}
+            if properties_json:
+                properties = json.loads(properties_json)
 
-        # 제목 속성 추가 — Notion DB는 보통 "이름" 또는 "Name"이 title 속성
-        # title 키가 properties에 없으면 기본적으로 추가
-        has_title = any(
-            isinstance(v, dict) and v.get("title") is not None
-            for v in properties.values()
-        )
-        if not has_title:
-            properties["이름"] = {
-                "title": [{"text": {"content": title}}]
+            has_title = any(
+                isinstance(v, dict) and v.get("title") is not None
+                for v in properties.values()
+            )
+            if not has_title:
+                properties["이름"] = {
+                    "title": [{"text": {"content": title}}]
+                }
+
+            create_params: dict = {
+                "parent": {"database_id": database_id},
+                "properties": properties,
+            }
+        else:
+            # 일반 페이지 하위에 생성
+            create_params = {
+                "parent": {"page_id": parent_page_id},
+                "properties": {
+                    "title": [{"text": {"content": title}}],
+                },
             }
 
-        page = client.pages.create(
-            parent={"database_id": database_id},
-            properties=properties,
-        )
+        # 본문 content가 있으면 children 블록 추가
+        if content:
+            children = []
+            for paragraph in content.split("\n"):
+                paragraph = paragraph.strip()
+                if paragraph:
+                    children.append({
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [{"type": "text", "text": {"content": paragraph}}],
+                        },
+                    })
+            if children:
+                create_params["children"] = children
+
+        page = client.pages.create(**create_params)
         logger.info("[TOOL] create_notion_page: 생성 성공 (id=%s)", page["id"])
         return {
             "status": "success",

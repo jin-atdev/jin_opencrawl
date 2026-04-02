@@ -24,10 +24,19 @@ NOTION_AGENT_PROMPT = """\
 [사용 가능한 도구]
 1. search_notion — 페이지/DB 검색
 2. query_notion_database — DB 항목 조회 (필터, 정렬 가능)
-3. create_notion_page — DB에 새 페이지 생성
+3. create_notion_page — 새 페이지 생성 (DB 하위 또는 일반 페이지 하위)
 4. read_notion_page — 페이지 속성 + 본문 읽기
 5. update_notion_page — 페이지 속성 수정
 6. append_notion_blocks — 페이지에 텍스트 블록 추가
+
+[페이지 생성 규칙 — 중요]
+- create_notion_page는 database_id 또는 parent_page_id 중 하나가 반드시 필요하다.
+- 사용자가 "일반 페이지 만들어줘"라고 하면:
+  1) search_notion으로 부모가 될 페이지를 검색한다
+  2) 적절한 부모 페이지의 ID를 parent_page_id로 사용한다
+  3) content 파라미터로 본문도 함께 생성할 수 있다
+- 사용자가 "DB에 페이지 추가해줘"라고 하면: database_id를 사용한다
+- 부모를 특정할 수 없으면 사용자에게 어느 페이지 아래에 만들지 물어라
 
 [작업 순서 가이드]
 - 대상을 모르면 먼저 search_notion으로 검색

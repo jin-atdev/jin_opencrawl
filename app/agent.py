@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
+from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend, StoreBackend
 from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 
@@ -12,6 +13,8 @@ from app.tools.calendar import get_calendar_tools
 from app.tools.gmail import get_gmail_tools
 from app.tools.notion import get_notion_tools
 from app.tools.search import get_tavily_tool
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
 # Sub-agent prompts
@@ -71,7 +74,7 @@ RESEARCH_AGENT_PROMPT = """\
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT_TEMPLATE = """\
-너는 jin_openclaw, 사용자의 AI 개인비서다.
+너는 사용자의 AI 개인비서다.
 한국어로 답한다.
 
 [현재 시간]
@@ -98,12 +101,30 @@ SYSTEM_PROMPT_TEMPLATE = """\
 - 위임 시 구체적인 지시와 기대 결과 형식을 명확히 전달
 - 서브에이전트 결과를 받으면 사용자에게 요약하여 전달
 
+[페르소나 관리]
+너의 이름, 말투, 성격은 /memories/persona.txt 에 저장된다.
+- 대화 시작 시 read_file로 /memories/persona.txt 를 읽어 자신의 정체성을 파악하라
+- 파일이 없거나 비어있으면 기본값 사용: 이름=jin_openclaw, 말투=친근한 존댓말. 파일이 없다고 임의로 생성하지 마라.
+- 사용자가 명시적으로 "이름 정해줘", "이름 바꿔줘", "말투 바꿔줘", "성격 바꿔줘" 등 요청할 때만 저장하라
+- 사용자가 요청하지 않았는데 임의로 페르소나를 생성하거나 수정하는 것은 절대 금지한다
+- 저장 절차:
+  1) 현재 persona.txt를 읽는다
+  2) 사용자가 요청한 항목만 반영하여 write_file 또는 edit_file로 저장한다
+  3) 즉시 변경된 페르소나로 응답한다
+- 저장 형식 (아래는 형식 예시일 뿐, 이 값을 기본값으로 저장하지 마라):
+  [이름] (사용자가 정한 이름)
+  [말투] (사용자가 정한 말투)
+  [성격] (사용자가 정한 성격)
+  [자기소개] (사용자가 정한 소개)
+- 페르소나에 설정된 이름으로 자신을 지칭하라
+- 페르소나에 설정된 말투와 성격을 일관되게 유지하라
+
 [메모리 관리 — 매우 중요]
 너는 사용자의 개인비서이므로, 사용자가 요청한 정보를 저장하고 불러오는 것은 너의 핵심 기능이다.
 사용자가 저장을 요청하면 반드시 write_file 또는 edit_file 도구로 /memories/user_profile.txt 에 실제로 저장하라.
 "기억했습니다"라고만 말하고 도구를 호출하지 않는 것은 절대 금지한다.
 
-- 대화 시작 시 read_file로 /memories/user_profile.txt 를 읽어 사용자 맥락을 파악하라
+- 대화 시작 시 /memories/persona.txt 와 /memories/user_profile.txt 를 둘 다 읽어 맥락을 파악하라
 - 사용자가 "기억해", "저장해", "잊지 마"라고 하면:
   1) read_file로 /memories/user_profile.txt 를 읽는다
   2) 중복이 없으면 edit_file 또는 write_file로 실제 저장한다
@@ -130,20 +151,6 @@ SYSTEM_PROMPT_TEMPLATE = """\
   [선호] 아침 미팅을 선호한다
   [루틴] 매주 월요일 10시 팀 회의
   [기술스택] Python, React, PostgreSQL
-
-[캘린더 사용 규칙]
-- 일정 생성 시 title, start, end 필수. 시간 형식: ISO 8601 (예: 2026-03-24T14:00:00+09:00)
-- "내일", "다음 주 월요일" 등 자연어 시간은 오늘 날짜 기준으로 변환하라
-- 시간 정보가 부족하면 사용자에게 물어라
-
-[이메일 규칙]
-- 메일 보내기 전 수신자, 제목, 본문을 사용자에게 확인받아라
-- 메일 목록 조회 시 발신자, 제목, 날짜를 표로 정리하라
-- 메일 본문 요약 요청 시 핵심 3줄 요약 + 액션 아이템을 제시하라
-
-[글쓰기 규칙]
-- 요약: 원문 1/3 이하, 핵심 포인트 번호 정리
-- 초안: 용도에 맞는 형식 (메일이면 인사/본문/마무리)
 
 [응답 규칙]
 - 마크다운 형식 사용 가능
@@ -209,10 +216,15 @@ def build_agent(store, checkpointer):
         tools=tools,
         system_prompt=system_prompt,
         subagents=subagents if subagents else None,
+        skills=["/skills/"],
         backend=lambda rt: CompositeBackend(
             default=StateBackend(rt),
             routes={
                 "/memories/": StoreBackend(rt),
+                "/skills/": FilesystemBackend(
+                    root_dir=str(_PROJECT_ROOT / "skills"),
+                    virtual_mode=True,
+                ),
             },
         ),
         store=store,

@@ -4,6 +4,7 @@ import base64
 import logging
 from email.mime.text import MIMEText
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from app.services.google_auth import get_gmail_service
@@ -18,6 +19,7 @@ def send_email(
     body: str,
     cc: str = "",
     bcc: str = "",
+    *, config: RunnableConfig | None = None,
 ) -> dict:
     """이메일을 보냅니다.
 
@@ -36,7 +38,7 @@ def send_email(
     service = get_gmail_service()
     if service is None:
         logger.error("[TOOL] send_email: Gmail 서비스 없음 (OAuth 미인증)")
-        return {"error": "Gmail이 연결되지 않았습니다. OAuth 인증을 먼저 진행해주세요."}
+        return {"error": "Gmail이 연결되지 않았습니다. Google OAuth 인증을 먼저 진행해주세요."}
 
     try:
         msg = MIMEText(body, "plain", "utf-8")
@@ -69,6 +71,7 @@ def send_email(
 def list_emails(
     query: str = "is:unread",
     max_results: int = 10,
+    *, config: RunnableConfig | None = None,
 ) -> list[dict]:
     """이메일 목록을 조회합니다.
 
@@ -84,7 +87,7 @@ def list_emails(
     service = get_gmail_service()
     if service is None:
         logger.error("[TOOL] list_emails: Gmail 서비스 없음 (OAuth 미인증)")
-        return [{"error": "Gmail이 연결되지 않았습니다."}]
+        return [{"error": "Gmail이 연결되지 않았습니다. Google OAuth 인증을 먼저 진행해주세요."}]
 
     try:
         result = (
@@ -124,7 +127,7 @@ def list_emails(
 
 
 @tool
-def read_email(email_id: str) -> dict:
+def read_email(email_id: str, *, config: RunnableConfig | None = None) -> dict:
     """이메일 본문을 읽습니다.
 
     Args:
@@ -138,7 +141,7 @@ def read_email(email_id: str) -> dict:
     service = get_gmail_service()
     if service is None:
         logger.error("[TOOL] read_email: Gmail 서비스 없음 (OAuth 미인증)")
-        return {"error": "Gmail이 연결되지 않았습니다."}
+        return {"error": "Gmail이 연결되지 않았습니다. Google OAuth 인증을 먼저 진행해주세요."}
 
     try:
         msg = (

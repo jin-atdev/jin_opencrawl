@@ -15,9 +15,9 @@ def get_tavily_tool():
         return None
 
     try:
-        from langchain_community.tools.tavily_search import TavilySearchResults
+        from langchain_tavily import TavilySearch
 
-        tool = TavilySearchResults(
+        tool = TavilySearch(
             api_key=config.tavily_api_key,
             max_results=5,
             search_depth="advanced",

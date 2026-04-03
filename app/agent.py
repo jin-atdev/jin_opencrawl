@@ -133,12 +133,11 @@ SYSTEM_PROMPT_TEMPLATE = """\
 - 위임 시 구체적인 지시와 기대 결과 형식을 명확히 전달
 - 서브에이전트 결과를 받으면 사용자에게 요약하여 전달
 
-{persona_block}
-
 [페르소나 관리 — 부트스트랩]
 너의 이름, 말투, 성격은 /memories/persona.txt 에 저장된다.
 
-■ 대화 시작 시 반드시 read_file로 /memories/persona.txt 를 읽어라.
+■ 매 대화 시작 시 반드시 read_file로 /memories/persona.txt 와 /memories/user_profile.txt 를 읽어라.
+  이 두 파일의 내용이 너의 페르소나와 사용자 맥락이다. 반드시 먼저 읽고 적용한 후 응답하라.
 
 ■ 파일이 없거나 비어있으면 → 부트스트랩 Q&A를 시작하라:
   사용자의 첫 메시지가 무엇이든, 먼저 아래 질문을 한 번에 하나씩 물어라:
@@ -201,6 +200,10 @@ SYSTEM_PROMPT_TEMPLATE = """\
   [루틴] 매주 월요일 10시 팀 회의
   [기술스택] Python, React, PostgreSQL
 
+[서비스 미연결 안내]
+- 도구 호출 결과에 "연결되지 않았습니다" 에러가 있으면,
+  사용자에게 .env 파일에 해당 서비스의 토큰/인증 정보를 설정하라고 안내하라.
+
 [응답 규칙]
 - 마크다운 형식 사용 가능
 - 간결하고 명확하게 답한다
@@ -219,45 +222,17 @@ def get_current_datetime() -> str:
     return f"{now.strftime('%Y-%m-%d %H:%M:%S')} ({weekdays[now.weekday()]}) KST"
 
 
-def _read_store_file(store, key: str) -> str:
-    """PostgresStore에서 파일 내용을 읽는다. 없으면 빈 문자열."""
-    for k in (key, f"/memories{key}"):
-        try:
-            item = store.get(("filesystem",), k)
-            if item and item.value:
-                lines = item.value.get("content", [])
-                return "\n".join(lines)
-        except Exception:
-            continue
-    return ""
-
 
 def build_agent(store, checkpointer):
     """deep agent를 생성하여 반환한다."""
     config = Config()
 
-    # 페르소나 & 유저 프로필 사전 로드
-    persona = _read_store_file(store, "/persona.txt")
-    profile = _read_store_file(store, "/user_profile.txt")
-
-    persona_block = ""
-    if persona:
-        persona_block += f"[현재 설정된 페르소나]\n{persona}"
-    if profile:
-        persona_block += f"\n\n[사용자 프로필]\n{profile}"
-    if persona_block:
-        persona_block += "\n※ 위 페르소나/프로필을 즉시 적용하라. 변경 요청 시 edit_file로 수정 후 반영."
-
-    logger.info("[Agent] 페르소나 로드: %s", "있음" if persona else "없음")
-    logger.info("[Agent] 유저 프로필 로드: %s", "있음" if profile else "없음")
-
-    # 시스템 프롬프트에 현재 시간 + 페르소나 주입
+    # 시스템 프롬프트에 현재 시간 주입 (페르소나는 에이전트가 매 세션마다 직접 로드)
     now = datetime.now()
     weekdays = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
     current_dt = f"{now.strftime('%Y-%m-%d %H:%M:%S')} ({weekdays[now.weekday()]})"
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         current_datetime=current_dt,
-        persona_block=persona_block,
     )
 
     # 메인 에이전트 도구 (캘린더 + 메일 + 시간 조회 + 날씨)
@@ -271,15 +246,13 @@ def build_agent(store, checkpointer):
     # 서브에이전트 구성
     subagents = []
 
-    notion_tools = get_notion_tools()
-    if notion_tools:
-        subagents.append({
-            "name": "notion-agent",
-            "description": "Notion 워크스페이스 관리. 페이지/DB 검색, 조회, 생성, 수정, 내용 추가.",
-            "system_prompt": NOTION_AGENT_PROMPT,
-            "tools": notion_tools,
-            "model": model,
-        })
+    subagents.append({
+        "name": "notion-agent",
+        "description": "Notion 워크스페이스 관리. 페이지/DB 검색, 조회, 생성, 수정, 내용 추가.",
+        "system_prompt": NOTION_AGENT_PROMPT,
+        "tools": get_notion_tools(),
+        "model": model,
+    })
 
     tavily = get_tavily_tool()
     if tavily:
@@ -291,15 +264,13 @@ def build_agent(store, checkpointer):
             "model": model,
         })
 
-    github_tools = get_github_tools()
-    if github_tools:
-        subagents.append({
-            "name": "github-agent",
-            "description": "GitHub 리포지토리 관리. PR 목록/상세 조회, 이슈 목록/상세 조회, 코멘트 작성.",
-            "system_prompt": GITHUB_AGENT_PROMPT,
-            "tools": github_tools,
-            "model": model,
-        })
+    subagents.append({
+        "name": "github-agent",
+        "description": "GitHub 리포지토리 관리. PR 목록/상세 조회, 이슈 목록/상세 조회, 코멘트 작성.",
+        "system_prompt": GITHUB_AGENT_PROMPT,
+        "tools": get_github_tools(),
+        "model": model,
+    })
 
     agent = create_deep_agent(
         model=model,

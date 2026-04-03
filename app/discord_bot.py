@@ -55,7 +55,6 @@ class InterruptView(discord.ui.View):
 @client.event
 async def on_ready():
     logger.info("Discord 봇 로그인: %s (id=%s)", client.user, client.user.id)
-    print(f"봇 로그인 완료: {client.user}")
 
     # Heartbeat 스케줄러 시작
     if _config and _config.heartbeat_enabled and _config.heartbeat_channel_id != 0:

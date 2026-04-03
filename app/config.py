@@ -31,7 +31,7 @@ class Config:
     github_username: str = os.getenv("GITHUB_USERNAME", "")
     github_default_repo: str = os.getenv("GITHUB_DEFAULT_REPO", "")
 
-    # Google Calendar
+    # Google
     google_client_secret_path: str = os.getenv(
         "GOOGLE_CLIENT_SECRET_PATH", "credentials/client_secret.json"
     )
@@ -45,8 +45,6 @@ class Config:
             "https://www.googleapis.com/auth/calendar",
         ).split(",")
     ]
-
-    # Google Gmail
     google_gmail_scopes: list[str] = [
         s.strip()
         for s in os.getenv(

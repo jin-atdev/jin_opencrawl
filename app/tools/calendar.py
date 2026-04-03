@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from app.services.google_auth import get_calendar_service
@@ -18,6 +19,7 @@ def create_calendar_event(
     description: str = "",
     attendees: list[str] | None = None,
     location: str = "",
+    *, config: RunnableConfig | None = None,
 ) -> dict:
     """Google Calendar에 새 일정을 생성합니다.
 
@@ -43,7 +45,7 @@ def create_calendar_event(
     service = get_calendar_service()
     if service is None:
         logger.error("[TOOL] create_calendar_event: Calendar 서비스 없음 (OAuth 미인증)")
-        return {"error": "Google Calendar가 연결되지 않았습니다. OAuth 인증을 먼저 진행해주세요."}
+        return {"error": "Google Calendar가 연결되지 않았습니다. Google OAuth 인증을 먼저 진행해주세요."}
 
     logger.info("[TOOL] create_calendar_event: Calendar 서비스 획득 완료")
     event_body: dict = {
@@ -80,6 +82,7 @@ def list_calendar_events(
     start_date: str,
     end_date: str,
     max_results: int = 10,
+    *, config: RunnableConfig | None = None,
 ) -> list[dict]:
     """Google Calendar에서 일정을 조회합니다.
 
@@ -96,7 +99,7 @@ def list_calendar_events(
     service = get_calendar_service()
     if service is None:
         logger.error("[TOOL] list_calendar_events: Calendar 서비스 없음 (OAuth 미인증)")
-        return [{"error": "Google Calendar가 연결되지 않았습니다."}]
+        return [{"error": "Google Calendar가 연결되지 않았습니다. Google OAuth 인증을 먼저 진행해주세요."}]
 
     logger.info("[TOOL] list_calendar_events: Calendar 서비스 획득 완료")
     try:
@@ -143,6 +146,7 @@ def update_calendar_event(
     end: str | None = None,
     description: str | None = None,
     location: str | None = None,
+    *, config: RunnableConfig | None = None,
 ) -> dict:
     """Google Calendar에서 기존 일정을 수정합니다.
 
@@ -179,7 +183,7 @@ def update_calendar_event(
     service = get_calendar_service()
     if service is None:
         logger.error("[TOOL] update_calendar_event: Calendar 서비스 없음 (OAuth 미인증)")
-        return {"error": "Google Calendar가 연결되지 않았습니다. OAuth 인증을 먼저 진행해주세요."}
+        return {"error": "Google Calendar가 연결되지 않았습니다. Google OAuth 인증을 먼저 진행해주세요."}
 
     try:
         event = (
@@ -202,7 +206,7 @@ def update_calendar_event(
 
 
 @tool
-def delete_calendar_event(event_id: str) -> dict:
+def delete_calendar_event(event_id: str, *, config: RunnableConfig | None = None) -> dict:
     """Google Calendar에서 일정을 삭제합니다.
 
     Args:
@@ -216,7 +220,7 @@ def delete_calendar_event(event_id: str) -> dict:
     service = get_calendar_service()
     if service is None:
         logger.error("[TOOL] delete_calendar_event: Calendar 서비스 없음 (OAuth 미인증)")
-        return {"error": "Google Calendar가 연결되지 않았습니다. OAuth 인증을 먼저 진행해주세요."}
+        return {"error": "Google Calendar가 연결되지 않았습니다. Google OAuth 인증을 먼저 진행해주세요."}
 
     try:
         service.events().delete(calendarId="primary", eventId=event_id).execute()

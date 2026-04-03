@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from app.config import Config
@@ -15,13 +16,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _get_notion_client():
-    """Notion Client를 반환한다. 토큰이 없으면 None."""
+    """Notion Client를 반환한다. .env의 notion_token 사용."""
     config = Config()
     if not config.notion_token:
         return None
-    from notion_client import Client
 
-    return Client(auth=config.notion_token)
+    try:
+        from notion_client import Client
+        return Client(auth=config.notion_token)
+    except Exception as exc:
+        logger.error("[TOOL] Notion 클라이언트 생성 실패: %s", exc, exc_info=True)
+        return None
 
 
 def _extract_title(page: dict) -> str:
@@ -114,7 +119,7 @@ def _extract_block_text(block: dict) -> str:
 # ---------------------------------------------------------------------------
 
 @tool
-def search_notion(query: str, filter_type: str = "") -> list[dict]:
+def search_notion(query: str, filter_type: str = "", *, config: RunnableConfig | None = None) -> list[dict]:
     """Notion 워크스페이스에서 페이지나 데이터베이스를 검색합니다.
 
     Args:
@@ -128,7 +133,7 @@ def search_notion(query: str, filter_type: str = "") -> list[dict]:
 
     client = _get_notion_client()
     if client is None:
-        return [{"error": "Notion이 연결되지 않았습니다. NOTION_TOKEN을 설정해주세요."}]
+        return [{"error": "Notion이 연결되지 않았습니다. .env에 NOTION_TOKEN을 설정해주세요."}]
 
     try:
         params: dict = {"query": query, "page_size": 10}
@@ -157,6 +162,7 @@ def query_notion_database(
     filter_json: str = "",
     sort_json: str = "",
     max_results: int = 20,
+    *, config: RunnableConfig | None = None,
 ) -> list[dict]:
     """Notion 데이터베이스의 항목을 조회합니다.
 
@@ -173,7 +179,7 @@ def query_notion_database(
 
     client = _get_notion_client()
     if client is None:
-        return [{"error": "Notion이 연결되지 않았습니다. NOTION_TOKEN을 설정해주세요."}]
+        return [{"error": "Notion이 연결되지 않았습니다. .env에 NOTION_TOKEN을 설정해주세요."}]
 
     try:
         params: dict = {"database_id": database_id, "page_size": min(max_results, 100)}
@@ -208,6 +214,7 @@ def create_notion_page(
     parent_page_id: str = "",
     properties_json: str = "",
     content: str = "",
+    *, config: RunnableConfig | None = None,
 ) -> dict:
     """Notion에 새 페이지를 생성합니다. database_id 또는 parent_page_id 중 하나를 반드시 지정해야 합니다.
 
@@ -228,7 +235,7 @@ def create_notion_page(
 
     client = _get_notion_client()
     if client is None:
-        return {"error": "Notion이 연결되지 않았습니다. NOTION_TOKEN을 설정해주세요."}
+        return {"error": "Notion이 연결되지 않았습니다. .env에 NOTION_TOKEN을 설정해주세요."}
 
     try:
         if database_id:
@@ -291,7 +298,7 @@ def create_notion_page(
 
 
 @tool
-def read_notion_page(page_id: str) -> dict:
+def read_notion_page(page_id: str, *, config: RunnableConfig | None = None) -> dict:
     """Notion 페이지의 속성과 본문을 읽습니다.
 
     Args:
@@ -304,7 +311,7 @@ def read_notion_page(page_id: str) -> dict:
 
     client = _get_notion_client()
     if client is None:
-        return {"error": "Notion이 연결되지 않았습니다. NOTION_TOKEN을 설정해주세요."}
+        return {"error": "Notion이 연결되지 않았습니다. .env에 NOTION_TOKEN을 설정해주세요."}
 
     try:
         page = client.pages.retrieve(page_id=page_id)
@@ -331,7 +338,7 @@ def read_notion_page(page_id: str) -> dict:
 
 
 @tool
-def update_notion_page(page_id: str, properties_json: str) -> dict:
+def update_notion_page(page_id: str, properties_json: str, *, config: RunnableConfig | None = None) -> dict:
     """Notion 페이지의 속성을 수정합니다.
 
     Args:
@@ -345,7 +352,7 @@ def update_notion_page(page_id: str, properties_json: str) -> dict:
 
     client = _get_notion_client()
     if client is None:
-        return {"error": "Notion이 연결되지 않았습니다. NOTION_TOKEN을 설정해주세요."}
+        return {"error": "Notion이 연결되지 않았습니다. .env에 NOTION_TOKEN을 설정해주세요."}
 
     try:
         properties = json.loads(properties_json)
@@ -369,6 +376,7 @@ def append_notion_blocks(
     page_id: str,
     content: str,
     block_type: str = "paragraph",
+    *, config: RunnableConfig | None = None,
 ) -> dict:
     """Notion 페이지에 텍스트 블록을 추가합니다.
 
@@ -384,7 +392,7 @@ def append_notion_blocks(
 
     client = _get_notion_client()
     if client is None:
-        return {"error": "Notion이 연결되지 않았습니다. NOTION_TOKEN을 설정해주세요."}
+        return {"error": "Notion이 연결되지 않았습니다. .env에 NOTION_TOKEN을 설정해주세요."}
 
     valid_types = {
         "paragraph", "heading_1", "heading_2", "heading_3",
@@ -425,12 +433,7 @@ def append_notion_blocks(
 # ---------------------------------------------------------------------------
 
 def get_notion_tools() -> list:
-    """NOTION_TOKEN이 없으면 빈 리스트를 반환한다."""
-    config = Config()
-    if not config.notion_token:
-        logger.warning("[TOOL] Notion 토큰 없음 → Notion 도구 비활성화")
-        return []
-
+    """Notion 도구 목록을 반환한다. 토큰 확인은 각 도구 실행 시 런타임에 수행."""
     tools = [
         search_notion,
         query_notion_database,

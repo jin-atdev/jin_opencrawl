@@ -20,23 +20,18 @@ def main() -> None:
         print(".env 파일에 유효한 API 키를 설정해주세요.")
         sys.exit(1)
 
-    if not config.discord_bot_token:
-        print("오류: DISCORD_BOT_TOKEN이 설정되지 않았습니다.")
-        print(".env 파일에 Discord 봇 토큰을 설정해주세요.")
-        sys.exit(1)
-
     from langgraph.checkpoint.memory import MemorySaver
     from langgraph.store.postgres import PostgresStore
 
     from app.agent import build_agent
-    from app.discord_bot import run_bot
+    from app.tui import run_tui
 
     checkpointer = MemorySaver()
 
     with PostgresStore.from_conn_string(config.database_url) as store:
         store.setup()
         agent = build_agent(store=store, checkpointer=checkpointer)
-        run_bot(agent, config, config.discord_bot_token)
+        run_tui(agent, config)
 
 
 if __name__ == "__main__":

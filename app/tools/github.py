@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import requests
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from app.config import Config
@@ -17,10 +18,11 @@ BASE_URL = "https://api.github.com"
 # ---------------------------------------------------------------------------
 
 def _get_github_session() -> requests.Session | None:
-    """인증된 requests.Session을 반환한다. 토큰이 없으면 None."""
+    """인증된 requests.Session을 반환한다. .env의 github_token 사용."""
     config = Config()
     if not config.github_token:
         return None
+
     session = requests.Session()
     session.headers.update({
         "Authorization": f"Bearer {config.github_token}",
@@ -31,7 +33,7 @@ def _get_github_session() -> requests.Session | None:
 
 
 def _resolve_repo(repo: str) -> str:
-    """repo가 비어있으면 Config의 기본 리포를 반환한다."""
+    """repo가 비어있으면 config의 기본 리포를 반환한다."""
     if repo:
         return repo
     config = Config()
@@ -47,6 +49,7 @@ def list_pull_requests(
     repo: str = "",
     state: str = "open",
     max_results: int = 10,
+    *, config: RunnableConfig | None = None,
 ) -> list[dict]:
     """GitHub 리포지토리의 Pull Request 목록을 조회합니다.
 
@@ -62,7 +65,7 @@ def list_pull_requests(
 
     session = _get_github_session()
     if session is None:
-        return [{"error": "GitHub이 연결되지 않았습니다. GITHUB_TOKEN을 설정해주세요."}]
+        return [{"error": "GitHub이 연결되지 않았습니다. .env에 GITHUB_TOKEN을 설정해주세요."}]
 
     repo = _resolve_repo(repo)
     if not repo:
@@ -108,6 +111,7 @@ def list_pull_requests(
 def get_pull_request(
     repo: str = "",
     pr_number: int = 0,
+    *, config: RunnableConfig | None = None,
 ) -> dict:
     """GitHub Pull Request의 상세 정보를 조회합니다. 리뷰 상태, CI 체크, 변경 파일 수 등을 포함합니다.
 
@@ -122,7 +126,7 @@ def get_pull_request(
 
     session = _get_github_session()
     if session is None:
-        return {"error": "GitHub이 연결되지 않았습니다. GITHUB_TOKEN을 설정해주세요."}
+        return {"error": "GitHub이 연결되지 않았습니다. .env에 GITHUB_TOKEN을 설정해주세요."}
 
     repo = _resolve_repo(repo)
     if not repo:
@@ -196,6 +200,7 @@ def list_issues(
     labels: str = "",
     assignee: str = "",
     max_results: int = 10,
+    *, config: RunnableConfig | None = None,
 ) -> list[dict]:
     """GitHub 리포지토리의 이슈 목록을 조회합니다 (PR 제외).
 
@@ -213,7 +218,7 @@ def list_issues(
 
     session = _get_github_session()
     if session is None:
-        return [{"error": "GitHub이 연결되지 않았습니다. GITHUB_TOKEN을 설정해주세요."}]
+        return [{"error": "GitHub이 연결되지 않았습니다. .env에 GITHUB_TOKEN을 설정해주세요."}]
 
     repo = _resolve_repo(repo)
     if not repo:
@@ -265,6 +270,7 @@ def list_issues(
 def get_issue(
     repo: str = "",
     issue_number: int = 0,
+    *, config: RunnableConfig | None = None,
 ) -> dict:
     """GitHub 이슈의 상세 정보를 조회합니다.
 
@@ -279,7 +285,7 @@ def get_issue(
 
     session = _get_github_session()
     if session is None:
-        return {"error": "GitHub이 연결되지 않았습니다. GITHUB_TOKEN을 설정해주세요."}
+        return {"error": "GitHub이 연결되지 않았습니다. .env에 GITHUB_TOKEN을 설정해주세요."}
 
     repo = _resolve_repo(repo)
     if not repo:
@@ -334,6 +340,7 @@ def create_issue_comment(
     repo: str = "",
     issue_number: int = 0,
     body: str = "",
+    *, config: RunnableConfig | None = None,
 ) -> dict:
     """GitHub 이슈 또는 PR에 코멘트를 작성합니다.
 
@@ -349,7 +356,7 @@ def create_issue_comment(
 
     session = _get_github_session()
     if session is None:
-        return {"error": "GitHub이 연결되지 않았습니다. GITHUB_TOKEN을 설정해주세요."}
+        return {"error": "GitHub이 연결되지 않았습니다. .env에 GITHUB_TOKEN을 설정해주세요."}
 
     repo = _resolve_repo(repo)
     if not repo:
@@ -385,12 +392,7 @@ def create_issue_comment(
 # ---------------------------------------------------------------------------
 
 def get_github_tools() -> list:
-    """GITHUB_TOKEN이 설정되어 있으면 GitHub 도구 목록을 반환한다. 없으면 빈 리스트."""
-    config = Config()
-    if not config.github_token:
-        logger.warning("[TOOL] GitHub 토큰 없음 → GitHub 도구 비활성화")
-        return []
-
+    """GitHub 도구 목록을 반환한다. 토큰 확인은 각 도구 실행 시 런타임에 수행."""
     tools = [
         list_pull_requests,
         get_pull_request,

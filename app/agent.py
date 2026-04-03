@@ -15,7 +15,10 @@ from app.tools.notion import get_notion_tools
 from app.tools.github import get_github_tools
 from app.tools.search import get_tavily_tool
 
+import logging
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Sub-agent prompts
@@ -128,6 +131,8 @@ SYSTEM_PROMPT_TEMPLATE = """\
 - 위임 시 구체적인 지시와 기대 결과 형식을 명확히 전달
 - 서브에이전트 결과를 받으면 사용자에게 요약하여 전달
 
+{persona_block}
+
 [페르소나 관리 — 부트스트랩]
 너의 이름, 말투, 성격은 /memories/persona.txt 에 저장된다.
 
@@ -212,15 +217,46 @@ def get_current_datetime() -> str:
     return f"{now.strftime('%Y-%m-%d %H:%M:%S')} ({weekdays[now.weekday()]}) KST"
 
 
+def _read_store_file(store, key: str) -> str:
+    """PostgresStore에서 파일 내용을 읽는다. 없으면 빈 문자열."""
+    for k in (key, f"/memories{key}"):
+        try:
+            item = store.get(("filesystem",), k)
+            if item and item.value:
+                lines = item.value.get("content", [])
+                return "\n".join(lines)
+        except Exception:
+            continue
+    return ""
+
+
 def build_agent(store, checkpointer):
     """deep agent를 생성하여 반환한다."""
     config = Config()
 
-    # 시스템 프롬프트에 현재 시간 주입
+    # 페르소나 & 유저 프로필 사전 로드
+    persona = _read_store_file(store, "/persona.txt")
+    profile = _read_store_file(store, "/user_profile.txt")
+
+    persona_block = ""
+    if persona:
+        persona_block += f"[현재 설정된 페르소나]\n{persona}"
+    if profile:
+        persona_block += f"\n\n[사용자 프로필]\n{profile}"
+    if persona_block:
+        persona_block += "\n※ 위 페르소나/프로필을 즉시 적용하라. 변경 요청 시 edit_file로 수정 후 반영."
+
+    logger.info("[Agent] 페르소나 로드: %s", "있음" if persona else "없음")
+    logger.info("[Agent] 유저 프로필 로드: %s", "있음" if profile else "없음")
+
+    # 시스템 프롬프트에 현재 시간 + 페르소나 주입
     now = datetime.now()
     weekdays = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
     current_dt = f"{now.strftime('%Y-%m-%d %H:%M:%S')} ({weekdays[now.weekday()]})"
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(current_datetime=current_dt)
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        current_datetime=current_dt,
+        persona_block=persona_block,
+    )
 
     # 메인 에이전트 도구 (캘린더 + 메일 + 시간 조회)
     tools = [get_current_datetime]

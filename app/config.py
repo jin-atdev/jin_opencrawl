@@ -26,6 +26,11 @@ class Config:
     # Notion
     notion_token: str = os.getenv("NOTION_TOKEN", "")
 
+    # GitHub
+    github_token: str = os.getenv("GITHUB_TOKEN", "")
+    github_username: str = os.getenv("GITHUB_USERNAME", "")
+    github_default_repo: str = os.getenv("GITHUB_DEFAULT_REPO", "")
+
     # Google Calendar
     google_client_secret_path: str = os.getenv(
         "GOOGLE_CLIENT_SECRET_PATH", "credentials/client_secret.json"

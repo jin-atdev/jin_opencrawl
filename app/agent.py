@@ -12,6 +12,7 @@ from app.config import Config
 from app.tools.calendar import get_calendar_tools
 from app.tools.gmail import get_gmail_tools
 from app.tools.notion import get_notion_tools
+from app.tools.github import get_github_tools
 from app.tools.search import get_tavily_tool
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -69,6 +70,30 @@ RESEARCH_AGENT_PROMPT = """\
 - 출처 (URL 포함)
 """
 
+GITHUB_AGENT_PROMPT = """\
+너는 GitHub 리포지토리 관리 전문 에이전트다.
+한국어로 답한다.
+
+[사용 가능한 도구]
+1. list_pull_requests — PR 목록 조회 (상태별 필터)
+2. get_pull_request — PR 상세 조회 (리뷰 상태, CI 결과, 변경사항)
+3. list_issues — 이슈 목록 조회 (상태, 라벨, 담당자 필터)
+4. get_issue — 이슈 상세 조회 (코멘트 포함)
+5. create_issue_comment — 이슈/PR에 코멘트 작성
+
+[작업 순서 가이드]
+- 특정 PR이나 이슈를 모르면 먼저 목록 조회 도구로 검색
+- PR 상세 정보가 필요하면 get_pull_request로 리뷰, CI, 변경사항 확인
+- 이슈 상세 내용은 get_issue로 확인 (최근 코멘트 포함)
+- repo 파라미터를 비워두면 기본 리포지토리가 사용됨
+
+[결과 규칙]
+- 결과를 구조화하여 반환하라 (표, 목록 등)
+- PR/이슈 링크를 함께 제공하라
+- CI 실패 시 어떤 체크가 실패했는지 구체적으로 안내하라
+- 오류 발생 시 원인과 해결 방법을 안내하라
+"""
+
 # ---------------------------------------------------------------------------
 # Main agent prompt
 # ---------------------------------------------------------------------------
@@ -87,12 +112,14 @@ SYSTEM_PROMPT_TEMPLATE = """\
 2. 이메일 관리 — Gmail로 이메일 읽기/보내기 (직접 처리)
 3. 리서치 — 웹 검색으로 정보 조사 및 정리 (research-agent에 위임)
 4. 노션 관리 — Notion 페이지/DB 검색, 조회, 생성, 수정, 내용 추가 (notion-agent에 위임)
-5. 글쓰기 — 요약, 초안 작성, 문체 변환
-6. 기억 — 사용자 정보를 장기 기억에 저장/활용
+5. GitHub 관리 — PR/이슈 조회, 코멘트 작성 (github-agent에 위임)
+6. 글쓰기 — 요약, 초안 작성, 문체 변환
+7. 기억 — 사용자 정보를 장기 기억에 저장/활용
 
 [작업 위임 규칙]
 - 웹 검색/리서치 → "research-agent"에 task 도구로 위임 (검색만 가능, Notion/캘린더/메일 접근 불가)
 - Notion 작업 → "notion-agent"에 task 도구로 위임 (Notion만 가능, 웹 검색 불가)
+- GitHub 작업 (PR, 이슈, 코멘트) → "github-agent"에 task 도구로 위임 (GitHub만 가능, 다른 서비스 접근 불가)
 - 캘린더/이메일 → 직접 처리
 - 중요: 서브에이전트는 자기 도구만 사용 가능하다. 절대 다른 영역의 작업을 함께 요청하지 마라.
 - 복합 작업(예: "검색 후 노션에 저장")은 반드시 단계별로 분리하라:
@@ -223,6 +250,16 @@ def build_agent(store, checkpointer):
             "description": "웹 리서치 전문. 검색, 조사, 최신 정보 조회.",
             "system_prompt": RESEARCH_AGENT_PROMPT,
             "tools": [tavily],
+            "model": model,
+        })
+
+    github_tools = get_github_tools()
+    if github_tools:
+        subagents.append({
+            "name": "github-agent",
+            "description": "GitHub 리포지토리 관리. PR 목록/상세 조회, 이슈 목록/상세 조회, 코멘트 작성.",
+            "system_prompt": GITHUB_AGENT_PROMPT,
+            "tools": github_tools,
             "model": model,
         })
 

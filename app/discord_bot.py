@@ -327,6 +327,76 @@ def _format_daily_briefing() -> str:
         lines.append("## 읽지 않은 이메일")
         lines.append(f"⚠️ 이메일 조회 실패: {exc}")
 
+    # ── GitHub PR / 이슈 ──
+    try:
+        if _config and _config.github_token and _config.github_username:
+            import requests as _requests
+
+            gh_session = _requests.Session()
+            gh_session.headers.update({
+                "Authorization": f"Bearer {_config.github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            })
+            username = _config.github_username
+
+            # 리뷰 요청된 PR
+            review_resp = gh_session.get(
+                "https://api.github.com/search/issues",
+                params={"q": f"is:open is:pr review-requested:{username}", "per_page": 10},
+            )
+            review_prs = review_resp.json().get("items", []) if review_resp.ok else []
+
+            # 내가 만든 열린 PR
+            author_resp = gh_session.get(
+                "https://api.github.com/search/issues",
+                params={"q": f"is:open is:pr author:{username}", "per_page": 10},
+            )
+            author_prs = author_resp.json().get("items", []) if author_resp.ok else []
+
+            # 할당된 이슈
+            assigned_resp = gh_session.get(
+                "https://api.github.com/search/issues",
+                params={"q": f"is:open is:issue assignee:{username}", "per_page": 10},
+            )
+            assigned_issues = assigned_resp.json().get("items", []) if assigned_resp.ok else []
+
+            lines.append("")
+            lines.append(f"## GitHub 리뷰 요청 PR ({len(review_prs)}건)")
+            if not review_prs:
+                lines.append("리뷰 요청된 PR이 없습니다.")
+            else:
+                for pr in review_prs:
+                    repo_name = pr["repository_url"].split("/repos/")[-1]
+                    lines.append(f"- #{pr['number']} {pr['title']} ({repo_name})")
+
+            lines.append("")
+            lines.append(f"## 내 열린 PR ({len(author_prs)}건)")
+            if not author_prs:
+                lines.append("열린 PR이 없습니다.")
+            else:
+                for pr in author_prs:
+                    repo_name = pr["repository_url"].split("/repos/")[-1]
+                    lines.append(f"- #{pr['number']} {pr['title']} ({repo_name})")
+
+            lines.append("")
+            lines.append(f"## 할당된 이슈 ({len(assigned_issues)}건)")
+            if not assigned_issues:
+                lines.append("할당된 이슈가 없습니다.")
+            else:
+                for issue in assigned_issues:
+                    repo_name = issue["repository_url"].split("/repos/")[-1]
+                    labels_str = ", ".join(lb["name"] for lb in issue.get("labels", []))
+                    entry = f"- #{issue['number']} {issue['title']} ({repo_name})"
+                    if labels_str:
+                        entry += f" [{labels_str}]"
+                    lines.append(entry)
+    except Exception as exc:
+        logger.error("[Briefing] GitHub 조회 실패: %s", exc, exc_info=True)
+        lines.append("")
+        lines.append("## GitHub")
+        lines.append(f"⚠️ GitHub 조회 실패: {exc}")
+
     lines.append("")
     lines.append("---")
     lines.append("자동 생성된 브리핑입니다.")

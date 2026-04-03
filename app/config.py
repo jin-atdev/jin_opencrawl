@@ -58,11 +58,6 @@ class Config:
     # Discord
     discord_bot_token: str = os.getenv("DISCORD_BOT_TOKEN", "")
 
-    # Daily Briefing
-    briefing_enabled: bool = os.getenv("BRIEFING_ENABLED", "false").lower() == "true"
-    briefing_time: str = os.getenv("BRIEFING_TIME", "09:00")
-    briefing_channel_id: int = int(os.getenv("BRIEFING_CHANNEL_ID", "0"))
-
     # Heartbeat
     heartbeat_enabled: bool = os.getenv("HEARTBEAT_ENABLED", "false").lower() == "true"
     heartbeat_interval: int = int(os.getenv("HEARTBEAT_INTERVAL", "30"))

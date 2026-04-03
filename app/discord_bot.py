@@ -16,8 +16,7 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 
 _agent = None
-_config_tpl: dict | None = None
-_config = None  # Config instance for briefing settings
+_config = None  # Config instance
 
 KST = timezone(timedelta(hours=9))
 
@@ -57,12 +56,6 @@ class InterruptView(discord.ui.View):
 async def on_ready():
     logger.info("Discord 봇 로그인: %s (id=%s)", client.user, client.user.id)
     print(f"봇 로그인 완료: {client.user}")
-
-    # 일일 브리핑 스케줄러 시작
-    if _config and _config.briefing_enabled and _config.briefing_channel_id != 0:
-        if not daily_briefing_task.is_running():
-            daily_briefing_task.start()
-            logger.info("[Briefing] 일일 브리핑 스케줄러 시작됨")
 
     # Heartbeat 스케줄러 시작
     if _config and _config.heartbeat_enabled and _config.heartbeat_channel_id != 0:
@@ -244,188 +237,11 @@ async def _send_long_message(channel: discord.abc.Messageable, text: str):
         text = text[split_at:].lstrip("\n")
 
 
-def _format_daily_briefing() -> str:
-    """오늘 일정 + 읽지 않은 메일을 조회하여 브리핑 마크다운을 생성한다."""
-    from app.services.google_auth import get_calendar_service, get_gmail_service
-
-    now = datetime.now(KST)
-    today_str = now.strftime("%Y년 %m월 %d일")
-    lines = [f"📅 **Daily Briefing - {today_str}**", ""]
-
-    # ── 오늘 일정 ──
-    try:
-        cal_service = get_calendar_service()
-        if cal_service is None:
-            lines.append("## 오늘의 일정")
-            lines.append("⚠️ Google Calendar가 연결되지 않았습니다.")
-        else:
-            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-            day_end = now.replace(hour=23, minute=59, second=59, microsecond=0).isoformat()
-            result = (
-                cal_service.events()
-                .list(
-                    calendarId="primary",
-                    timeMin=day_start,
-                    timeMax=day_end,
-                    maxResults=20,
-                    singleEvents=True,
-                    orderBy="startTime",
-                )
-                .execute()
-            )
-            events = result.get("items", [])
-            lines.append(f"## 오늘의 일정 ({len(events)}건)")
-            if not events:
-                lines.append("오늘 예정된 일정이 없습니다.")
-            else:
-                for e in events:
-                    start_raw = e.get("start", {}).get("dateTime", e.get("start", {}).get("date", ""))
-                    end_raw = e.get("end", {}).get("dateTime", e.get("end", {}).get("date", ""))
-                    summary = e.get("summary", "(제목 없음)")
-                    location = e.get("location", "")
-
-                    # 시간 포맷
-                    try:
-                        s = datetime.fromisoformat(start_raw).strftime("%H:%M")
-                        en = datetime.fromisoformat(end_raw).strftime("%H:%M")
-                        time_str = f"{s}-{en}"
-                    except (ValueError, TypeError):
-                        time_str = "종일"
-
-                    entry = f"- {time_str} | {summary}"
-                    if location:
-                        entry += f" | {location}"
-                    lines.append(entry)
-    except Exception as exc:
-        logger.error("[Briefing] 캘린더 조회 실패: %s", exc, exc_info=True)
-        lines.append("## 오늘의 일정")
-        lines.append(f"⚠️ 일정 조회 실패: {exc}")
-
-    lines.append("")
-
-    # ── 읽지 않은 이메일 ──
-    try:
-        gmail_service = get_gmail_service()
-        if gmail_service is None:
-            lines.append("## 읽지 않은 이메일")
-            lines.append("⚠️ Gmail이 연결되지 않았습니다.")
-        else:
-            result = (
-                gmail_service.users()
-                .messages()
-                .list(userId="me", q="is:unread", maxResults=10)
-                .execute()
-            )
-            messages = result.get("messages", [])
-            lines.append(f"## 읽지 않은 이메일 ({len(messages)}건)")
-            if not messages:
-                lines.append("읽지 않은 이메일이 없습니다.")
-            else:
-                for i, msg_info in enumerate(messages, 1):
-                    msg = (
-                        gmail_service.users()
-                        .messages()
-                        .get(
-                            userId="me",
-                            id=msg_info["id"],
-                            format="metadata",
-                            metadataHeaders=["Subject", "From"],
-                        )
-                        .execute()
-                    )
-                    headers = {
-                        h["name"]: h["value"]
-                        for h in msg.get("payload", {}).get("headers", [])
-                    }
-                    sender = headers.get("From", "")
-                    # "이름 <email>" → "이름" 만 추출
-                    if "<" in sender:
-                        sender = sender.split("<")[0].strip().strip('"')
-                    subject = headers.get("Subject", "(제목 없음)")
-                    lines.append(f"{i}. **{sender}** {subject}")
-    except Exception as exc:
-        logger.error("[Briefing] 이메일 조회 실패: %s", exc, exc_info=True)
-        lines.append("## 읽지 않은 이메일")
-        lines.append(f"⚠️ 이메일 조회 실패: {exc}")
-
-    # ── GitHub PR / 이슈 ──
-    try:
-        if _config and _config.github_token and _config.github_username:
-            import requests as _requests
-
-            gh_session = _requests.Session()
-            gh_session.headers.update({
-                "Authorization": f"Bearer {_config.github_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            })
-            username = _config.github_username
-
-            # 리뷰 요청된 PR
-            review_resp = gh_session.get(
-                "https://api.github.com/search/issues",
-                params={"q": f"is:open is:pr review-requested:{username}", "per_page": 10},
-            )
-            review_prs = review_resp.json().get("items", []) if review_resp.ok else []
-
-            # 내가 만든 열린 PR
-            author_resp = gh_session.get(
-                "https://api.github.com/search/issues",
-                params={"q": f"is:open is:pr author:{username}", "per_page": 10},
-            )
-            author_prs = author_resp.json().get("items", []) if author_resp.ok else []
-
-            # 할당된 이슈
-            assigned_resp = gh_session.get(
-                "https://api.github.com/search/issues",
-                params={"q": f"is:open is:issue assignee:{username}", "per_page": 10},
-            )
-            assigned_issues = assigned_resp.json().get("items", []) if assigned_resp.ok else []
-
-            lines.append("")
-            lines.append(f"## GitHub 리뷰 요청 PR ({len(review_prs)}건)")
-            if not review_prs:
-                lines.append("리뷰 요청된 PR이 없습니다.")
-            else:
-                for pr in review_prs:
-                    repo_name = pr["repository_url"].split("/repos/")[-1]
-                    lines.append(f"- #{pr['number']} {pr['title']} ({repo_name})")
-
-            lines.append("")
-            lines.append(f"## 내 열린 PR ({len(author_prs)}건)")
-            if not author_prs:
-                lines.append("열린 PR이 없습니다.")
-            else:
-                for pr in author_prs:
-                    repo_name = pr["repository_url"].split("/repos/")[-1]
-                    lines.append(f"- #{pr['number']} {pr['title']} ({repo_name})")
-
-            lines.append("")
-            lines.append(f"## 할당된 이슈 ({len(assigned_issues)}건)")
-            if not assigned_issues:
-                lines.append("할당된 이슈가 없습니다.")
-            else:
-                for issue in assigned_issues:
-                    repo_name = issue["repository_url"].split("/repos/")[-1]
-                    labels_str = ", ".join(lb["name"] for lb in issue.get("labels", []))
-                    entry = f"- #{issue['number']} {issue['title']} ({repo_name})"
-                    if labels_str:
-                        entry += f" [{labels_str}]"
-                    lines.append(entry)
-    except Exception as exc:
-        logger.error("[Briefing] GitHub 조회 실패: %s", exc, exc_info=True)
-        lines.append("")
-        lines.append("## GitHub")
-        lines.append(f"⚠️ GitHub 조회 실패: {exc}")
-
-    lines.append("")
-    lines.append("---")
-    lines.append("자동 생성된 브리핑입니다.")
-    return "\n".join(lines)
-
-
 HEARTBEAT_PROMPT = (
-    "Heartbeat 체크를 실행하라. 관련 스킬을 참고하여 다가오는 일정과 읽지 않은 메일을 확인하고, "
+    "Heartbeat 체크를 실행하라. 다음 항목들을 확인하라:\n"
+    "1. 다가오는 일정 (오늘 남은 일정, 임박한 일정)\n"
+    "2. 읽지 않은 메일\n"
+    "3. GitHub: 리뷰 요청된 PR, 내가 만든 열린 PR, 할당된 이슈\n"
     "알릴 게 있으면 알림 메시지를, 없으면 정확히 'HEARTBEAT_OK'라고만 응답하라. "
     "확인만 하라. 일정 생성/수정/삭제, 메일 전송 등 변경 작업은 절대 하지 마라."
 )
@@ -487,50 +303,11 @@ async def _before_heartbeat():
     await client.wait_until_ready()
 
 
-@tasks.loop(hours=24)
-async def daily_briefing_task():
-    """매일 지정 시간에 일일 브리핑을 전송한다."""
-    if _config is None or not _config.briefing_enabled or _config.briefing_channel_id == 0:
-        return
-
-    channel = client.get_channel(_config.briefing_channel_id)
-    if channel is None:
-        try:
-            channel = await client.fetch_channel(_config.briefing_channel_id)
-        except Exception as exc:
-            logger.error("[Briefing] 채널을 찾을 수 없습니다 (id=%d): %s", _config.briefing_channel_id, exc)
-            return
-
-    logger.info("[Briefing] 일일 브리핑 생성 시작")
-    try:
-        briefing = await asyncio.to_thread(_format_daily_briefing)
-        await _send_long_message(channel, briefing)
-        logger.info("[Briefing] 일일 브리핑 전송 완료")
-    except Exception as exc:
-        logger.error("[Briefing] 일일 브리핑 전송 실패: %s", exc, exc_info=True)
-
-
-@daily_briefing_task.before_loop
-async def _before_daily_briefing():
-    """봇이 준비될 때까지 대기한다."""
-    await client.wait_until_ready()
-
-
 def run_bot(agent, config, token: str):
     """Discord 봇을 실행한다."""
     global _agent, _config
     _agent = agent
     _config = config
-
-    # 브리핑 스케줄러 시간 설정
-    if config.briefing_enabled and config.briefing_channel_id != 0:
-        try:
-            h, m = map(int, config.briefing_time.split(":"))
-            briefing_time = dt_time(hour=h, minute=m, tzinfo=KST)
-            daily_briefing_task.change_interval(time=briefing_time)
-            logger.info("[Briefing] 스케줄 설정: %s KST", config.briefing_time)
-        except (ValueError, TypeError) as exc:
-            logger.error("[Briefing] 시간 파싱 실패: %s", exc)
 
     # Heartbeat 스케줄러 간격 설정
     if config.heartbeat_enabled and config.heartbeat_channel_id != 0:

@@ -14,6 +14,7 @@ from app.tools.gmail import get_gmail_tools
 from app.tools.notion import get_notion_tools
 from app.tools.github import get_github_tools
 from app.tools.search import get_tavily_tool
+from app.tools.weather import get_weather
 
 import logging
 
@@ -113,11 +114,12 @@ SYSTEM_PROMPT_TEMPLATE = """\
 [핵심 역할]
 1. 일정 관리 — Google Calendar로 일정 생성/조회/수정/삭제 (직접 처리)
 2. 이메일 관리 — Gmail로 이메일 읽기/보내기 (직접 처리)
-3. 리서치 — 웹 검색으로 정보 조사 및 정리 (research-agent에 위임)
-4. 노션 관리 — Notion 페이지/DB 검색, 조회, 생성, 수정, 내용 추가 (notion-agent에 위임)
-5. GitHub 관리 — PR/이슈 조회, 코멘트 작성 (github-agent에 위임)
-6. 글쓰기 — 요약, 초안 작성, 문체 변환
-7. 기억 — 사용자 정보를 장기 기억에 저장/활용
+3. 날씨 조회 — get_weather 도구로 현재 날씨 + 3일 예보 조회 (직접 처리)
+4. 리서치 — 웹 검색으로 정보 조사 및 정리 (research-agent에 위임)
+5. 노션 관리 — Notion 페이지/DB 검색, 조회, 생성, 수정, 내용 추가 (notion-agent에 위임)
+6. GitHub 관리 — PR/이슈 조회, 코멘트 작성 (github-agent에 위임)
+7. 글쓰기 — 요약, 초안 작성, 문체 변환
+8. 기억 — 사용자 정보를 장기 기억에 저장/활용
 
 [작업 위임 규칙]
 - 웹 검색/리서치 → "research-agent"에 task 도구로 위임 (검색만 가능, Notion/캘린더/메일 접근 불가)
@@ -258,8 +260,8 @@ def build_agent(store, checkpointer):
         persona_block=persona_block,
     )
 
-    # 메인 에이전트 도구 (캘린더 + 메일 + 시간 조회)
-    tools = [get_current_datetime]
+    # 메인 에이전트 도구 (캘린더 + 메일 + 시간 조회 + 날씨)
+    tools = [get_current_datetime, get_weather]
     tools.extend(get_calendar_tools())
     tools.extend(get_gmail_tools())
 

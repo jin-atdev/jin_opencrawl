@@ -34,6 +34,12 @@ async def on_ready():
             daily_briefing_task.start()
             logger.info("[Briefing] 일일 브리핑 스케줄러 시작됨")
 
+    # Heartbeat 스케줄러 시작
+    if _config and _config.heartbeat_enabled and _config.heartbeat_channel_id != 0:
+        if not heartbeat_task.is_running():
+            heartbeat_task.start()
+            logger.info("[Heartbeat] 스케줄러 시작됨 (간격: %d분)", _config.heartbeat_interval)
+
 
 @client.event
 async def on_message(message: discord.Message):
@@ -327,6 +333,69 @@ def _format_daily_briefing() -> str:
     return "\n".join(lines)
 
 
+HEARTBEAT_PROMPT = (
+    "Heartbeat 체크를 실행하라. 관련 스킬을 참고하여 다가오는 일정과 읽지 않은 메일을 확인하고, "
+    "알릴 게 있으면 알림 메시지를, 없으면 정확히 'HEARTBEAT_OK'라고만 응답하라. "
+    "확인만 하라. 일정 생성/수정/삭제, 메일 전송 등 변경 작업은 절대 하지 마라."
+)
+
+
+@tasks.loop(minutes=30)
+async def heartbeat_task():
+    """주기적으로 에이전트를 깨워 일정/메일 등을 확인하고 알림한다."""
+    if _config is None or not _config.heartbeat_enabled or _config.heartbeat_channel_id == 0:
+        return
+
+    # 활성 시간 체크 (KST)
+    now = datetime.now(KST)
+    try:
+        start_h, start_m = map(int, _config.heartbeat_active_start.split(":"))
+        end_h, end_m = map(int, _config.heartbeat_active_end.split(":"))
+        if not (dt_time(start_h, start_m) <= now.time() <= dt_time(end_h, end_m)):
+            logger.info("[Heartbeat] 활성 시간 외 — 건너뜀")
+            return
+    except (ValueError, TypeError):
+        pass  # 파싱 실패 시 시간 제한 없이 실행
+
+    # 격리된 thread_id 사용 (사용자 대화와 분리)
+    config = {"configurable": {"thread_id": "heartbeat"}}
+
+    logger.info("[Heartbeat] 체크 시작")
+    try:
+        result = await asyncio.to_thread(
+            _agent.invoke,
+            {"messages": [{"role": "user", "content": HEARTBEAT_PROMPT}]},
+            config,
+            version="v2",
+        )
+    except Exception as exc:
+        logger.error("[Heartbeat] agent.invoke 예외: %s", exc, exc_info=True)
+        return
+
+    response = _extract_response(result)
+    if not response or "HEARTBEAT_OK" in response:
+        logger.info("[Heartbeat] 알릴 내용 없음")
+        return
+
+    # 알림 전송
+    channel = client.get_channel(_config.heartbeat_channel_id)
+    if channel is None:
+        try:
+            channel = await client.fetch_channel(_config.heartbeat_channel_id)
+        except Exception as exc:
+            logger.error("[Heartbeat] 채널 찾기 실패: %s", exc)
+            return
+
+    await _send_long_message(channel, response)
+    logger.info("[Heartbeat] 알림 전송 완료")
+
+
+@heartbeat_task.before_loop
+async def _before_heartbeat():
+    """봇이 준비될 때까지 대기한다."""
+    await client.wait_until_ready()
+
+
 @tasks.loop(hours=24)
 async def daily_briefing_task():
     """매일 지정 시간에 일일 브리핑을 전송한다."""
@@ -371,6 +440,12 @@ def run_bot(agent, config, token: str):
             logger.info("[Briefing] 스케줄 설정: %s KST", config.briefing_time)
         except (ValueError, TypeError) as exc:
             logger.error("[Briefing] 시간 파싱 실패: %s", exc)
+
+    # Heartbeat 스케줄러 간격 설정
+    if config.heartbeat_enabled and config.heartbeat_channel_id != 0:
+        heartbeat_task.change_interval(minutes=config.heartbeat_interval)
+        logger.info("[Heartbeat] 스케줄 설정: %d분 간격, 활성 시간 %s~%s KST",
+                     config.heartbeat_interval, config.heartbeat_active_start, config.heartbeat_active_end)
 
     logger.info("[Discord] 봇 시작")
     client.run(token, log_handler=None)

@@ -58,6 +58,13 @@ class Config:
     briefing_time: str = os.getenv("BRIEFING_TIME", "09:00")
     briefing_channel_id: int = int(os.getenv("BRIEFING_CHANNEL_ID", "0"))
 
+    # Heartbeat
+    heartbeat_enabled: bool = os.getenv("HEARTBEAT_ENABLED", "false").lower() == "true"
+    heartbeat_interval: int = int(os.getenv("HEARTBEAT_INTERVAL", "30"))
+    heartbeat_channel_id: int = int(os.getenv("HEARTBEAT_CHANNEL_ID", "0"))
+    heartbeat_active_start: str = os.getenv("HEARTBEAT_ACTIVE_START", "09:00")
+    heartbeat_active_end: str = os.getenv("HEARTBEAT_ACTIVE_END", "22:00")
+
     # PostgreSQL
     database_url: str = os.getenv(
         "DATABASE_URL", "postgresql://hwangjin-yeong:@localhost:5432/jin_db"

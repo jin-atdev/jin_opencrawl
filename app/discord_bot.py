@@ -18,9 +18,39 @@ client = discord.Client(intents=intents)
 _agent = None
 _config_tpl: dict | None = None
 _config = None  # Config instance for briefing settings
-_interrupt_users: set[int] = set()  # interrupt 응답 대기 중인 user ID
 
 KST = timezone(timedelta(hours=9))
+
+
+class InterruptView(discord.ui.View):
+    """승인/거절 버튼 UI. 요청한 유저만 클릭 가능."""
+
+    def __init__(self, author_id: int):
+        super().__init__(timeout=60.0)
+        self.author_id = author_id
+        self.result: bool | None = None  # True=승인, False=거절, None=타임아웃
+
+    @discord.ui.button(label="승인", style=discord.ButtonStyle.green)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("본인만 응답할 수 있습니다.", ephemeral=True)
+            return
+        self.result = True
+        self.stop()
+        await interaction.response.edit_message(view=None)
+
+    @discord.ui.button(label="거절", style=discord.ButtonStyle.red)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("본인만 응답할 수 있습니다.", ephemeral=True)
+            return
+        self.result = False
+        self.stop()
+        await interaction.response.edit_message(view=None)
+
+    async def on_timeout(self):
+        self.result = None
+        self.stop()
 
 
 @client.event
@@ -44,9 +74,6 @@ async def on_ready():
 @client.event
 async def on_message(message: discord.Message):
     if message.author == client.user:
-        return
-
-    if message.author.id in _interrupt_users:
         return
 
     content = message.content.strip()
@@ -86,7 +113,7 @@ async def on_message(message: discord.Message):
 
 
 async def _handle_interrupts(result, config: dict, message: discord.Message):
-    """interrupt 발생 시 Discord 메시지로 승인/거절을 받는다."""
+    """interrupt 발생 시 Discord 버튼으로 승인/거절을 받는다."""
     while hasattr(result, "interrupts") and result.interrupts:
         interrupt_value = result.interrupts[0].value
         action_requests = interrupt_value.get("action_requests", [])
@@ -108,30 +135,24 @@ async def _handle_interrupts(result, config: dict, message: discord.Message):
                 value=f"```\n{args_text}\n```",
                 inline=False,
             )
-        embed.set_footer(text="승인: y  |  거절: 그 외 입력  (60초 내 응답)")
+        embed.set_footer(text="아래 버튼을 눌러주세요 (60초 내 응답)")
 
-        await message.channel.send(embed=embed)
+        # 버튼 UI로 승인/거절 대기
+        view = InterruptView(message.author.id)
+        await message.channel.send(embed=embed, view=view)
+        await view.wait()
 
-        # 같은 유저의 응답 대기 (on_message에서 무시하도록 등록)
-        _interrupt_users.add(message.author.id)
-        def check(m: discord.Message) -> bool:
-            return m.author == message.author and m.channel == message.channel
-
-        try:
-            reply = await client.wait_for("message", check=check, timeout=60.0)
-            answer = reply.content.strip().lower()
-        except asyncio.TimeoutError:
-            await message.channel.send("시간 초과로 거절 처리되었습니다.")
-            answer = "n"
-        finally:
-            _interrupt_users.discard(message.author.id)
-
-        if answer in ("y", "yes", "네", "ㅇ", "승인"):
+        if view.result is True:
             decisions = [{"type": "approve"} for _ in action_requests]
             logger.info("[Discord] interrupt 승인 (%d개)", len(action_requests))
-        else:
+        elif view.result is False:
             decisions = [{"type": "reject"} for _ in action_requests]
             logger.info("[Discord] interrupt 거절 (%d개)", len(action_requests))
+        else:
+            # 타임아웃
+            await message.channel.send("시간 초과로 거절 처리되었습니다.")
+            decisions = [{"type": "reject"} for _ in action_requests]
+            logger.info("[Discord] interrupt 타임아웃 → 거절 (%d개)", len(action_requests))
 
         async with message.channel.typing():
             try:

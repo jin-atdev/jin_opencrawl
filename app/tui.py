@@ -10,16 +10,20 @@ logger = logging.getLogger(__name__)
 
 def run_tui(agent, config) -> None:
     """TUI 메인. Discord 토큰이 있으면 자동 연결 후 채팅 루프를 시작한다."""
-    print("\n=== OpenClaw ===\n")
+    print("\n=== Jin비서 ===\n")
 
     # Discord 자동 연결
     _auto_start_discord(agent, config)
+
+    # WebChat URL 안내
+    if config.webchat_enabled:
+        print(f"  WebChat: http://{config.webchat_host}:{config.webchat_port}")
 
     # 채팅 루프
     thread_id = "tui-local"
     invoke_config = {"configurable": {"thread_id": thread_id}}
 
-    print("채팅을 시작합니다. (종료: exit)\n")
+    print("\n채팅을 시작합니다. (종료: exit)\n")
 
     while True:
         try:

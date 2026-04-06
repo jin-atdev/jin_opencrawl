@@ -63,6 +63,11 @@ class Config:
     heartbeat_active_start: str = os.getenv("HEARTBEAT_ACTIVE_START", "09:00")
     heartbeat_active_end: str = os.getenv("HEARTBEAT_ACTIVE_END", "22:00")
 
+    # WebChat
+    webchat_enabled: bool = os.getenv("WEBCHAT_ENABLED", "true").lower() == "true"
+    webchat_host: str = os.getenv("WEBCHAT_HOST", "127.0.0.1")
+    webchat_port: int = int(os.getenv("WEBCHAT_PORT", "8080"))
+
     # PostgreSQL
     database_url: str = os.getenv(
         "DATABASE_URL", "postgresql://hwangjin-yeong:@localhost:5432/jin_db"

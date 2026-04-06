@@ -43,9 +43,10 @@ def main() -> None:
 def _start_webchat_server(agent, config: Config) -> None:
     """FastAPI WebChat 서버를 데몬 스레드로 실행한다."""
     import uvicorn
-    from app.web.server import app, set_agent
+    from app.web.server import app, set_agent, set_config
 
     set_agent(agent)
+    set_config(config)
     thread = threading.Thread(
         target=uvicorn.run,
         args=(app,),

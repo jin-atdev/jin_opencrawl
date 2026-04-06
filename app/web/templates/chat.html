@@ -459,6 +459,36 @@
     margin-left: 2px;
   }
 
+  /* ─── Briefing ─── */
+  .briefing-card {
+    max-width: 800px;
+    width: 100%;
+    margin: 0 auto;
+    background: rgba(34,211,238,0.05);
+    border: 1px solid rgba(34,211,238,0.2);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .briefing-card h3 {
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .briefing-card .briefing-body {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text-primary);
+  }
+
+  .briefing-card .briefing-body p { margin-bottom: 8px; }
+  .briefing-card .briefing-body p:last-child { margin-bottom: 0; }
+
   /* ─── Empty state ─── */
   .empty-state {
     flex: 1;
@@ -838,6 +868,18 @@ function appendToolCalls(calls, elapsed) {
   scrollBottom();
 }
 
+function appendBriefing(content) {
+  removeEmpty();
+  const card = document.createElement('div');
+  card.className = 'briefing-card';
+  card.innerHTML = `
+    <h3>&#9670; 브리핑</h3>
+    <div class="briefing-body">${marked.parse(content)}</div>
+  `;
+  chatContainer.appendChild(card);
+  scrollBottom();
+}
+
 function removeEmpty() {
   const el = chatContainer.querySelector('.empty-state');
   if (el) el.remove();
@@ -900,6 +942,8 @@ function connectWS(sessionId) {
       stopThinkingTimer();
       removeTyping();
       showInterrupt(data.actions);
+    } else if (data.type === 'briefing') {
+      appendBriefing(data.content);
     } else if (data.type === 'error') {
       stopThinkingTimer();
       removeTyping();

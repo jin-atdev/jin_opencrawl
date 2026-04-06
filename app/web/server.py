@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,11 +20,29 @@ app = FastAPI()
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 _agent = None
+_config = None
+_active_connections: set[WebSocket] = set()
+
+KST = timezone(timedelta(hours=9))
+
+HEARTBEAT_PROMPT = (
+    "Heartbeat 체크를 실행하라. 다음 항목들을 확인하라:\n"
+    "1. 다가오는 일정 (오늘 남은 일정, 임박한 일정)\n"
+    "2. 읽지 않은 메일\n"
+    "3. GitHub: 리뷰 요청된 PR, 내가 만든 열린 PR, 할당된 이슈\n"
+    "알릴 게 있으면 알림 메시지를, 없으면 정확히 'HEARTBEAT_OK'라고만 응답하라. "
+    "확인만 하라. 일정 생성/수정/삭제, 메일 전송 등 변경 작업은 절대 하지 마라."
+)
 
 
 def set_agent(agent) -> None:
     global _agent
     _agent = agent
+
+
+def set_config(config) -> None:
+    global _config
+    _config = config
 
 
 def _extract_response(result) -> str:
@@ -81,6 +100,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str | None = None):
     config = {"configurable": {"thread_id": thread_id}}
 
     logger.info("[WebChat] 연결됨 (session=%s, thread=%s)", session_id, thread_id)
+    _active_connections.add(websocket)
 
     try:
         while True:
@@ -132,6 +152,7 @@ async def websocket_chat(websocket: WebSocket, session_id: str | None = None):
                     await websocket.send_json({"type": "response", "content": "(응답을 생성하지 못했습니다)"})
 
     except WebSocketDisconnect:
+        _active_connections.discard(websocket)
         logger.info("[WebChat] 연결 종료 (session=%s)", session_id)
 
 
@@ -187,3 +208,65 @@ async def _handle_interrupts(websocket: WebSocket, result, config: dict, session
             break
 
     return result
+
+
+# ─── Heartbeat (브리핑) ───
+
+@app.on_event("startup")
+async def _start_heartbeat():
+    if _config and _config.heartbeat_enabled:
+        asyncio.create_task(_heartbeat_loop())
+        logger.info("[WebChat Heartbeat] 스케줄러 시작 (%d분 간격)", _config.heartbeat_interval)
+
+
+async def _heartbeat_loop():
+    """주기적으로 에이전트를 깨워 일정/메일 등을 확인하고 WebSocket으로 브로드캐스트한다."""
+    while True:
+        await asyncio.sleep(_config.heartbeat_interval * 60)
+
+        if not _agent or not _config or not _config.heartbeat_enabled:
+            continue
+
+        # 활성 시간 체크 (KST)
+        now = datetime.now(KST)
+        try:
+            start_h, start_m = map(int, _config.heartbeat_active_start.split(":"))
+            end_h, end_m = map(int, _config.heartbeat_active_end.split(":"))
+            if not (dt_time(start_h, start_m) <= now.time() <= dt_time(end_h, end_m)):
+                logger.info("[WebChat Heartbeat] 활성 시간 외 — 건너뜀")
+                continue
+        except (ValueError, TypeError):
+            pass
+
+        if not _active_connections:
+            logger.info("[WebChat Heartbeat] 연결된 클라이언트 없음 — 건너뜀")
+            continue
+
+        config = {"configurable": {"thread_id": "heartbeat-web"}}
+        logger.info("[WebChat Heartbeat] 체크 시작")
+
+        try:
+            result = await asyncio.to_thread(
+                _agent.invoke,
+                {"messages": [{"role": "user", "content": HEARTBEAT_PROMPT}]},
+                config,
+                version="v2",
+            )
+        except Exception as exc:
+            logger.error("[WebChat Heartbeat] agent.invoke 예외: %s", exc, exc_info=True)
+            continue
+
+        response = _extract_response(result)
+        if not response or "HEARTBEAT_OK" in response:
+            logger.info("[WebChat Heartbeat] 알릴 내용 없음")
+            continue
+
+        # 모든 활성 연결에 브리핑 브로드캐스트
+        dead = set()
+        for conn in _active_connections:
+            try:
+                await conn.send_json({"type": "briefing", "content": response})
+            except Exception:
+                dead.add(conn)
+        _active_connections.difference_update(dead)
+        logger.info("[WebChat Heartbeat] 브리핑 전송 완료 (%d명)", len(_active_connections))
